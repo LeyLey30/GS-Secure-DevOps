@@ -1,0 +1,3 @@
+# Copie para terraform.tfvars (esse arquivo NAO vai para o GitHub)
+alerta_email = "seu.email@fiap.com.br"
+location     = "brazilsouth"
