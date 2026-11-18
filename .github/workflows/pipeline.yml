@@ -30,7 +30,7 @@ jobs:
 
       - name: Semgrep (vulnerabilidades no codigo)
         run: |
-          pip install semgrep==1.97.0
+          pip install semgrep==1.97.0 "setuptools<81"
           semgrep scan --config p/default --error --metrics=off --exclude mvp/dados.js .
 
       - name: Trivy config (Dockerfile e Terraform)
