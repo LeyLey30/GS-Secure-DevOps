@@ -1,5 +1,0 @@
-# Gerado automaticamente por scripts/01-bootstrap-backend.sh como backend.hcl (fora do Git)
-resource_group_name  = "rg-pisofirme-tfstate"
-storage_account_name = "stpfstateXXXXXXXX"
-container_name       = "tfstate"
-key                  = "pisofirme.tfstate"
