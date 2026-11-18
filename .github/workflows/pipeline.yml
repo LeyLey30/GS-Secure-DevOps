@@ -1,0 +1,99 @@
+name: pipeline-devsecops
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: pisofirme-painel
+
+jobs:
+  seguranca:
+    name: Gitleaks + Semgrep + Trivy (config)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gitleaks (segredos vazados)
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.21.2 \
+            dir /repo --redact --verbose
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Semgrep (vulnerabilidades no codigo)
+        run: |
+          pip install semgrep==1.97.0
+          semgrep scan --config p/default --error --metrics=off --exclude mvp/dados.js .
+
+      - name: Trivy config (Dockerfile e Terraform)
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work ghcr.io/aquasecurity/trivy:0.57.0 \
+            config --exit-code 1 --severity HIGH,CRITICAL .
+
+  build:
+    name: Build + docker compose + Trivy (imagem)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sobe a stack com docker compose (teste de fumaca)
+        run: |
+          docker compose up -d --build
+          for i in $(seq 1 15); do curl -fsS http://localhost:8080/healthz && break || sleep 2; done
+          curl -fsS http://localhost:8080/ > /dev/null
+          docker compose down
+
+      - name: Build da imagem
+        run: docker build -t "$IMAGE_NAME:${{ github.sha }}" .
+
+      - name: Trivy (vulnerabilidades da imagem)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/aquasecurity/trivy:0.57.0 image \
+            --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
+            "$IMAGE_NAME:${{ github.sha }}"
+
+  deploy:
+    name: Deploy no Azure Container Apps
+    needs: [seguranca, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login no ACR
+        run: az acr login --name "${{ secrets.ACR_NAME }}"
+
+      - name: Build e push
+        run: |
+          IMG="${{ secrets.ACR_NAME }}.azurecr.io/${IMAGE_NAME}:${{ github.sha }}"
+          docker build -t "$IMG" .
+          docker push "$IMG"
+          echo "IMG=$IMG" >> "$GITHUB_ENV"
+
+      - name: Atualiza o Container App
+        run: |
+          az containerapp update \
+            --name "${{ secrets.CONTAINERAPP_NAME }}" \
+            --resource-group "${{ secrets.RESOURCE_GROUP }}" \
+            --image "$IMG"
+
+      - name: Teste de fumaca na URL publica
+        run: |
+          FQDN=$(az containerapp show -n "${{ secrets.CONTAINERAPP_NAME }}" \
+                 -g "${{ secrets.RESOURCE_GROUP }}" \
+                 --query properties.configuration.ingress.fqdn -o tsv)
+          for i in $(seq 1 20); do curl -fsS "https://$FQDN/healthz" && exit 0 || sleep 5; done
+          exit 1
