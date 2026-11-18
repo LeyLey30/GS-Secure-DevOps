@@ -1,0 +1,9 @@
+.git
+.github
+terraform
+scripts
+docs
+*.md
+.env
+*.tfvars
+*.tfstate*
