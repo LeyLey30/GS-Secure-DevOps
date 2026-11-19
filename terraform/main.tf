@@ -39,33 +39,22 @@ resource "azurerm_application_insights" "ai" {
   tags                = local.tags
 }
 
-# ---------- Registro de imagens (sem usuario admin) ----------
+# ---------- Registro de imagens ----------
+# DECISAO REGISTRADA: o usuario admin do ACR fica HABILITADO porque o ambiente
+# do Container Apps em uso (modelo "express", em preview) recusa identidade
+# gerenciada para puxar imagem (erro ExpressRegistrySystemIdentityNotSupported).
+# Mitigacao: a senha nunca vai para o codigo; ela e lida pelo Terraform, guardada
+# como secret do Container App e pode ser rotacionada com
+#   az acr credential renew --password-name password
+# Quando o modelo express suportar identidade gerenciada, voltar para
+# admin_enabled = false + AcrPull por identidade.
 resource "azurerm_container_registry" "acr" {
   name                = "acrpisofirme${random_string.sufixo.result}"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
   sku                 = "Basic"
-  admin_enabled       = false # sem credencial admin: acesso so por identidade (RBAC)
+  admin_enabled       = true
   tags                = local.tags
-}
-
-# Identidade que o Container App usa para PUXAR imagem (sem senha)
-resource "azurerm_user_assigned_identity" "app" {
-  name                = "id-pisofirme-app"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  tags                = local.tags
-}
-
-resource "azurerm_role_assignment" "acr_pull" {
-  scope                = azurerm_container_registry.acr.id
-  role_definition_name = "AcrPull"
-  principal_id         = azurerm_user_assigned_identity.app.principal_id
-}
-
-resource "time_sleep" "aguarda_rbac" {
-  depends_on      = [azurerm_role_assignment.acr_pull]
-  create_duration = "60s"
 }
 
 # ---------- Hospedagem ----------
@@ -84,14 +73,16 @@ resource "azurerm_container_app" "app" {
   revision_mode                = "Single"
   tags                         = local.tags
 
-  identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.app.id]
+  # Senha do registro guardada como secret do app (nao fica no codigo).
+  secret {
+    name  = "registry-senha"
+    value = azurerm_container_registry.acr.admin_password
   }
 
   registry {
-    server   = azurerm_container_registry.acr.login_server
-    identity = azurerm_user_assigned_identity.app.id
+    server               = azurerm_container_registry.acr.login_server
+    username             = azurerm_container_registry.acr.admin_username
+    password_secret_name = "registry-senha"
   }
 
   template {
@@ -122,8 +113,6 @@ resource "azurerm_container_app" "app" {
   lifecycle {
     ignore_changes = [template[0].container[0].image]
   }
-
-  depends_on = [time_sleep.aguarda_rbac]
 }
 
 # ---------- Observabilidade: teste de disponibilidade (LATENCIA) ----------
