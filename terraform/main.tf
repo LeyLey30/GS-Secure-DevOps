@@ -82,7 +82,7 @@ resource "azurerm_container_app" "app" {
   registry {
     server               = azurerm_container_registry.acr.login_server
     username             = azurerm_container_registry.acr.admin_username
-    password_secret_name = "registry-senha"
+    password_secret_name = "registry-senha" # gitleaks:allow (nome do secret, nao e senha)
   }
 
   template {
