@@ -38,3 +38,5 @@ docker compose up --build
 - ACR sem usuario admin; o app puxa imagem por identidade gerenciada (AcrPull).
 - Unico ponto de entrada: HTTPS 443. Nao ha SSH/RDP expostos.
 - O painel mostra dados agregados e simulados; nao ha dado pessoal. Detalhes em `docs/ARQUITETURA.md`.
+
+Deploy em producao via GitHub Actions.
